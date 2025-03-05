@@ -1,5 +1,5 @@
 streamlit==1.32.0
-pytube==15.0.0
+yt-dlp==2024.3.10
 groq==0.4.2
 python-dotenv==1.0.1
 openai-whisper==20231117

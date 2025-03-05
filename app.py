@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from pytube import YouTube
+from yt_dlp import YoutubeDL
 from moviepy.editor import AudioFileClip
 import whisper
 from dotenv import load_dotenv
@@ -9,6 +9,7 @@ import json
 import unidecode
 import requests
 import time
+import re
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -115,8 +116,22 @@ def call_ai_api(messages):
 
 def get_youtube_id(url):
     try:
-        yt = YouTube(url)
-        return yt.video_id
+        # Pattern pour extraire l'ID YouTube
+        patterns = [
+            r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',  # Pour les URLs standards
+            r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})',  # Pour les URLs courtes
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        
+        # Si aucun pattern ne correspond, essayer avec yt-dlp
+        with YoutubeDL() as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info.get('id')
+            
     except Exception as e:
         raise Exception(f"URL YouTube invalide : {str(e)}")
 
@@ -165,74 +180,63 @@ def download_youtube_audio(url, output_path="temp", max_retries=3):
             try:
                 debug_log(f"Tentative de téléchargement {retry_count + 1}/{max_retries}")
                 
-                # Configuration de pytube avec des en-têtes personnalisés
-                yt = YouTube(
-                    url,
-                    use_oauth=False,
-                    allow_oauth_cache=True
-                )
+                # Configuration de yt-dlp
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'quiet': True,
+                    'no_warnings': True
+                }
                 
-                # Configuration des en-têtes
-                yt.bypass_age_gate()
+                debug_log("Démarrage du téléchargement...")
                 
-                # Attendre que les informations de la vidéo soient chargées
-                debug_log("Récupération des informations de la vidéo...")
-                try:
-                    title = yt.title
-                    debug_log(f"Vidéo trouvée : {title}")
-                except Exception as e:
-                    debug_log(f"Erreur lors de la récupération du titre : {str(e)}")
-                    debug_log("Tentative de continuer malgré l'erreur...")
-                
-                # Récupérer tous les flux disponibles
-                debug_log("Recherche des flux audio disponibles...")
-                streams = yt.streams.filter(only_audio=True, file_extension='mp4').order_by('abr').desc()
-                
-                if not streams:
-                    raise Exception("Aucun flux audio disponible")
-                
-                # Sélectionner le meilleur flux audio
-                audio_stream = streams.first()
-                if not audio_stream:
-                    raise Exception("Impossible de trouver un flux audio approprié")
-                
-                debug_log(f"Flux audio sélectionné : {audio_stream.abr if hasattr(audio_stream, 'abr') else 'Qualité inconnue'}")
-                
-                # Télécharger en MP4
-                debug_log("Téléchargement du fichier audio...")
-                mp4_path = audio_stream.download(output_path)
-                
-                if not os.path.exists(mp4_path):
-                    raise Exception("Le fichier audio n'a pas été téléchargé correctement")
-                
-                debug_log("Conversion en MP3...")
-                # Convertir en MP3
-                mp3_path = os.path.join(output_path, f"{os.path.splitext(os.path.basename(mp4_path))[0]}.mp3")
-                
-                try:
-                    audio_clip = AudioFileClip(mp4_path)
-                    audio_clip.write_audiofile(mp3_path, verbose=False, logger=None)
-                    audio_clip.close()
-                except Exception as e:
-                    debug_log(f"Erreur lors de la conversion en MP3 : {str(e)}")
-                    if os.path.exists(mp4_path):
-                        os.remove(mp4_path)
-                    raise e
-                
-                # Nettoyer
-                if os.path.exists(mp4_path):
-                    os.remove(mp4_path)
-                
-                if not os.path.exists(mp3_path):
-                    raise Exception("La conversion en MP3 a échoué")
-                
-                debug_log("Téléchargement et conversion terminés avec succès")
-                return mp3_path
+                # Télécharger l'audio
+                with YoutubeDL(ydl_opts) as ydl:
+                    try:
+                        # Récupérer les informations de la vidéo
+                        info = ydl.extract_info(url, download=False)
+                        title = info.get('title', 'video')
+                        debug_log(f"Vidéo trouvée : {title}")
+                        
+                        # Télécharger la vidéo
+                        debug_log("Téléchargement et conversion en MP3...")
+                        ydl.download([url])
+                        
+                        # Construire le chemin du fichier MP3
+                        mp3_path = os.path.join(output_path, f"{title}.mp3")
+                        if not os.path.exists(mp3_path):
+                            # Si le fichier n'existe pas avec le titre exact, prendre le premier fichier MP3 trouvé
+                            mp3_files = [f for f in os.listdir(output_path) if f.endswith('.mp3')]
+                            if mp3_files:
+                                mp3_path = os.path.join(output_path, mp3_files[0])
+                            else:
+                                raise Exception("Fichier MP3 non trouvé après le téléchargement")
+                        
+                        debug_log("Téléchargement et conversion terminés avec succès")
+                        return mp3_path
+                        
+                    except Exception as e:
+                        debug_log(f"Erreur lors du téléchargement : {str(e)}")
+                        raise e
                 
             except Exception as e:
                 last_error = str(e)
                 debug_log(f"Erreur lors de la tentative {retry_count + 1}: {last_error}")
                 retry_count += 1
+                
+                # Nettoyer les fichiers partiels
+                for f in os.listdir(output_path):
+                    if f.endswith(('.mp3', '.part', '.temp')):
+                        try:
+                            os.remove(os.path.join(output_path, f))
+                        except:
+                            pass
+                
                 if retry_count < max_retries:
                     debug_log("Nouvelle tentative dans 2 secondes...")
                     time.sleep(2)
