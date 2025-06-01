@@ -2,6 +2,7 @@ streamlit
 yt-dlp
 openai
 groq
-ffmpeg-python # Bien que yt-dlp puisse utiliser ffmpeg system, cette dépendance peut aider à s'assurer qu'il est disponible.
-pydub # Pour le découpage audio
-google-generativeai # Pour l'API Gemini 
+ffmpeg-python
+pydub
+google-generativeai
+audioop-lts 
