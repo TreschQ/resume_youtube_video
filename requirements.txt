@@ -1,10 +1,7 @@
-streamlit==1.32.0
-yt-dlp==2024.3.10
-groq==0.4.2
-python-dotenv==1.0.1
-openai-whisper==20231117
-torch==2.2.1
-moviepy==1.0.3
-youtube-transcript-api==0.6.2
-unidecode==1.3.8
-requests==2.31.0
+streamlit
+yt-dlp
+openai
+groq
+ffmpeg-python # Bien que yt-dlp puisse utiliser ffmpeg system, cette dépendance peut aider à s'assurer qu'il est disponible.
+pydub # Pour le découpage audio
+google-generativeai # Pour l'API Gemini 
